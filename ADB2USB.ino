@@ -39,7 +39,7 @@
  * keymap by modifying the keymap.h file. More information is provided in the header of the keymap.h file.
  *
  * ADB keyboards contain a power key used to turn on the computer. This is no longer useful in modern computers, but it is a great key to perform any custom functions.
- * For convenience I have included two functions called handlePowerKeyPress() (starting in LINE 83) and handlePowerKeyRelease() (starting in LINE 94),
+ * For convenience I have included two functions called handlePowerKeyPress() (starting in LINE 89) and handlePowerKeyRelease() (starting in LINE 100),
  * so you can program what you want the key to do when pressed and released.
  *
  * If you would like to learn more about the ADB protocol, Szymon Łopaciuk wrote a very good post explaining the protocol.
@@ -67,11 +67,17 @@
 
 /*
  * DEBUG
- * Uncomment the #define DEBUG line to enable debug prints
+ * Uncomment the appropriate #define line to enable debug prints for each section
+ *
+ * COMM_DEBUG: Debug ADB communication. Will print all communication in the bus
+ * KEY_DEBUG: Debug Keyboard. Will print the pressed and released keys
+ *
  * NOTE: Debug prints WILL slow down program execution. Only enable if needed.
  */
-#undef DEBUG
-//#define DEBUG
+#undef COMM_DEBUG
+#undef KEY_DEBUG
+//#define COMM_DEBUG  // <-- Uncomment line to enable COMM_DEBUG
+//#define KEY_DEBUG   // <-- Uncomment line to enable KEY_DEBUG
 
 /*
  * handlePowerKeyPress
@@ -127,9 +133,9 @@ uint8_t scroll_lock_light = 0;
  */
 void setup() {
 
-  #ifdef DEBUG
+  #if defined COMM_DEBUG || defined KEY_DEBUG
     Serial.begin(9600);
-    Serial.println("Running Setup");
+    Serial.println("DEBUG ENABLED");
   #endif
 
   /* Set bus output as low, and pull bus high */
@@ -165,60 +171,66 @@ void loop() {
   if (talk(2, 0, &reg0)) {
     /* Check MSB of first key event byte (1 if key released, 0 if key pressed) */
     if (reg0 >> 15) {
-      #ifdef DEBUG
-        Serial.print("Key Released: 0x");
-        Serial.println((reg0 >> 8) & 0x7F, HEX);
+      #ifdef KEY_DEBUG
+        Serial.print("Key Released (1st Byte): 0x");
+        Serial.print((reg0 >> 8) & 0x7F, HEX);
+        Serial.print(" (");
+        Serial.print((keymap[(reg0 >> 8) & 0x7F] >= 32 && keymap[(reg0 >> 8) & 0x7F] <= 126) ? (char) keymap[(reg0 >> 8) & 0x7F] : '-');
+        Serial.println(")");
       #endif
 
       /* Check in keymap if released key is mapped to anything */
       if (keymap[(reg0 >> 8) & 0x7F]) {
-        /*
-         * Handle Caps Lock release
-         *
-         * NOTE: Caps Lock behaves different from other keys in the Apple Extended Keyboard II.
-         *       The key is locked in the down position when pressed (activating Caps Lock), and goes back up when pressed again (turning off Caps Lock).
-         *       For the host computer to recognize Caps Lock properly, it needs to behave like a normal key. It needs to be pressed and then released for each toggle.
-         *       This section adds a press command to the caps lock before sending a release command, as the key press in the keyboard is just registered as a key release.
-         *       It also turns off the Caps Lock light in the keyboard.
-         */
+        /* Check if key released is Caps Lock */
         if (keymap[(reg0 >> 8) & 0x7F] == KEY_CAPS_LOCK) {
-          Keyboard.press(KEY_CAPS_LOCK);
-          delay(75);
+          /*
+           * Handle Caps Lock release
+           *
+           * NOTE: Caps Lock behaves different from other keys in the Apple Extended Keyboard II.
+           *       The key is locked in the down position when pressed (activating Caps Lock), and goes back up when pressed again (turning off Caps Lock).
+           *       For the host computer to recognize Caps Lock properly, it needs to behave like a normal key. It needs to be pressed and then released for each toggle.
+           *       This section sends both a press and a release command for the caps lock key, as the key press in the keyboard is just registered as a key release.
+           *       It also turns off the Caps Lock light in the keyboard.
+           */
+          Keyboard.write(KEY_CAPS_LOCK);
           caps_lock_light = 0;
           setLights();
+        } else {
+          /* Send a key release command with the key released */
+          Keyboard.release(keymap[(reg0 >> 8) & 0x7F]);
         }
-
-        /* Send a key release command with the key released */
-        Keyboard.release(keymap[(reg0 >> 8) & 0x7F]);
       } else if ((reg0 >> 8) & 0x7F == 0x7F) {
         /* Power button release action */
         handlePowerKeyRelease();
       }
     } else {
-      #ifdef DEBUG
-        Serial.print("Key Pressed: 0x");
-        Serial.println((reg0 >> 8) & 0x7F, HEX);
+      #ifdef KEY_DEBUG
+        Serial.print("Key Pressed (1st Byte): 0x");
+        Serial.print((reg0 >> 8) & 0x7F, HEX);
+        Serial.print(" (");
+        Serial.print((keymap[(reg0 >> 8) & 0x7F] >= 32 && keymap[(reg0 >> 8) & 0x7F] <= 126) ? (char) keymap[(reg0 >> 8) & 0x7F] : '-');
+        Serial.println(")");
       #endif
 
       /* Check in keymap if pressed key is mapped to anything */
       if (keymap[(reg0 >> 8) & 0x7F]) {
-        /* Send a key press command with the key pressed */
-        Keyboard.press(keymap[(reg0 >> 8) & 0x7F]);
-
-        /*
-         * Handle Caps Lock press
-         *
-         * NOTE: Caps Lock behaves different from other keys in the Apple Extended Keyboard II.
-         *       The key is locked in the down position when pressed (activating Caps Lock), and goes back up when pressed again (turning off Caps Lock).
-         *       For the host computer to recognize Caps Lock properly, it needs to behave like a normal key. It needs to be pressed and then released for each toggle.
-         *       This section adds a release command to the caps lock after sending a press command, as the key press in the keyboard is just registered as a key press.
-         *       It also turns on the Caps Lock light in the keyboard.
-         */
+        /* Check if key pressed is Caps Lock */
         if (keymap[(reg0 >> 8) & 0x7F] == KEY_CAPS_LOCK) {
-          delay(75);
+          /*
+           * Handle Caps Lock press
+           *
+           * NOTE: Caps Lock behaves different from other keys in the Apple Extended Keyboard II.
+           *       The key is locked in the down position when pressed (activating Caps Lock), and goes back up when pressed again (turning off Caps Lock).
+           *       For the host computer to recognize Caps Lock properly, it needs to behave like a normal key. It needs to be pressed and then released for each toggle.
+           *       This section sends both a press and a release command for the caps lock key, as the key press in the keyboard is just registered as a key press.
+           *       It also turns on the Caps Lock light in the keyboard.
+           */
+          Keyboard.write(KEY_CAPS_LOCK);
           caps_lock_light = 1;
           setLights();
-          Keyboard.release(KEY_CAPS_LOCK);
+        } else {
+          /* Send a key press command with the key pressed */
+          Keyboard.press(keymap[(reg0 >> 8) & 0x7F]);
         }
       } else if ((reg0 >> 8) & 0x7F == 0x7F) {
         /* Power button press action */
@@ -228,58 +240,63 @@ void loop() {
 
     /* Check MSB of second key event byte (1 if key released, 0 if key pressed) */
     if ((reg0 >> 7) & 1) {
-      #ifdef DEBUG
-        Serial.print("Key Released: 0x");
-        Serial.println(reg0 & 0x7F, HEX);
+      #ifdef KEY_DEBUG
+        Serial.print("Key Released (2nd Byte): 0x");
+        Serial.print(reg0 & 0x7F, HEX);
+        Serial.print(" (");
+        Serial.print((keymap[reg0 & 0x7F] >= 32 && keymap[reg0 & 0x7F] <= 126) ? (char) keymap[reg0 & 0x7F] : '-');
+        Serial.println(")");
       #endif
 
       /* Check in keymap if released key is mapped to anything */
       if (keymap[reg0 & 0x7F]) {
-
-        /*
-         * Handle Caps Lock release
-         *
-         * NOTE: Caps Lock behaves different from other keys in the Apple Extended Keyboard II.
-         *       The key is locked in the down position when pressed (activating Caps Lock), and goes back up when pressed again (turning off Caps Lock).
-         *       For the host computer to recognize Caps Lock properly, it needs to behave like a normal key. It needs to be pressed and then released for each toggle.
-         *       This section adds a press command to the caps lock before sending a release command, as the key press in the keyboard is just registered as a key release.
-         *       It also turns off the Caps Lock light in the keyboard.
-         */
+        /* Check if key released is Caps Lock */
         if (keymap[reg0 & 0x7F] == KEY_CAPS_LOCK) {
-          Keyboard.press(KEY_CAPS_LOCK);
-          delay(75);
+          /*
+           * Handle Caps Lock release
+           *
+           * NOTE: Caps Lock behaves different from other keys in the Apple Extended Keyboard II.
+           *       The key is locked in the down position when pressed (activating Caps Lock), and goes back up when pressed again (turning off Caps Lock).
+           *       For the host computer to recognize Caps Lock properly, it needs to behave like a normal key. It needs to be pressed and then released for each toggle.
+           *       This section sends both a press and a release command for the caps lock key, as the key press in the keyboard is just registered as a key release.
+           *       It also turns off the Caps Lock light in the keyboard.
+           */
+          Keyboard.write(KEY_CAPS_LOCK);
           caps_lock_light = 0;
           setLights();
+        } else {
+          /* Send a key release command with the key released */
+          Keyboard.release(keymap[reg0 & 0x7F]);
         }
-
-        /* Send a key release command with the key released */
-        Keyboard.release(keymap[reg0 & 0x7F]);
       }
     } else {
-      #ifdef DEBUG
-        Serial.print("Key Pressed: 0x");
-        Serial.println(reg0 & 0x7F, HEX);
+      #ifdef KEY_DEBUG
+        Serial.print("Key Pressed (2nd Byte): 0x");
+        Serial.print(reg0 & 0x7F, HEX);
+        Serial.print(" (");
+        Serial.print((keymap[reg0 & 0x7F] >= 32 && keymap[reg0 & 0x7F] <= 126) ? (char) keymap[reg0 & 0x7F] : '-');
+        Serial.println(")");
       #endif
 
       /* Check in keymap if pressed key is mapped to anything */
       if (keymap[reg0 & 0x7F]) {
-        /* Send a key press command with the key pressed */
-        Keyboard.press(keymap[reg0 & 0x7F]);
-
-        /*
-         * Handle Caps Lock press
-         *
-         * NOTE: Caps Lock behaves different from other keys in the Apple Extended Keyboard II.
-         *       The key is locked in the down position when pressed (activating Caps Lock), and goes back up when pressed again (turning off Caps Lock).
-         *       For the host computer to recognize Caps Lock properly, it needs to behave like a normal key. It needs to be pressed and then released for each toggle.
-         *       This section adds a release command to the caps lock after sending a press command, as the key press in the keyboard is just registered as a key press.
-         *       It also turns on the Caps Lock light in the keyboard.
-         */
+        /* Check if key pressed is Caps Lock */
         if (keymap[reg0 & 0x7F] == KEY_CAPS_LOCK) {
-          delay(75);
+          /*
+           * Handle Caps Lock press
+           *
+           * NOTE: Caps Lock behaves different from other keys in the Apple Extended Keyboard II.
+           *       The key is locked in the down position when pressed (activating Caps Lock), and goes back up when pressed again (turning off Caps Lock).
+           *       For the host computer to recognize Caps Lock properly, it needs to behave like a normal key. It needs to be pressed and then released for each toggle.
+           *       This section sends both a press and a release command for the caps lock key, as the key press in the keyboard is just registered as a key press.
+           *       It also turns on the Caps Lock light in the keyboard.
+           */
+          Keyboard.write(KEY_CAPS_LOCK);
           caps_lock_light = 1;
           setLights();
-          Keyboard.release(KEY_CAPS_LOCK);
+        } else {
+          /* Send a key press command with the key pressed */
+          Keyboard.press(keymap[reg0 & 0x7F]);
         }
       }
     }
@@ -343,7 +360,7 @@ void attentionSync(void) {
  */
 void listen(uint8_t address, uint8_t reg, uint16_t data) {
 
-  #ifdef DEBUG
+  #ifdef COMM_DEBUG
     Serial.print("LISTEN to device with address ");
     Serial.print(address);
     Serial.print(" to register ");
@@ -406,7 +423,7 @@ void listen(uint8_t address, uint8_t reg, uint16_t data) {
  */
 bool talk(uint8_t address, uint8_t reg, uint16_t *data) {
 
-  #ifdef DEBUG
+  #ifdef COMM_DEBUG
     Serial.print("TALK from device with address ");
     Serial.print(address);
     Serial.print(" from register ");
@@ -464,7 +481,7 @@ bool talk(uint8_t address, uint8_t reg, uint16_t *data) {
     _delay_us(20);
   }
 
-  #ifdef DEBUG
+  #ifdef COMM_DEBUG
     Serial.print("Response: 0x");
     Serial.println(response, HEX);
     Serial.println(response, BIN);
