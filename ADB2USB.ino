@@ -501,15 +501,19 @@ bool talk(uint8_t address, uint8_t reg, uint16_t *data) {
 void setLights(void) {
   uint16_t data = 0xFFFF;
 
+  /* Set Num Lock Light */
   if (num_lock_light)
     data &= 0xFFFE;
 
+  /* Set Caps Lock Light */
   if (caps_lock_light)
     data &= 0xFFFD;
 
+  /* Set Scroll Lock Light */
   if (scroll_lock_light)
     data &= 0xFFFB;
 
+  /* Send light information to the keyboard through a LISTEN command */
   listen(2, 2, data);
 }
 
